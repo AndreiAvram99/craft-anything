@@ -38,27 +38,35 @@ struct Browsing {
     shown: String,
     /// What was being typed, for Down past the newest.
     draft: String,
+    /// The pictures attached when this prompt was first typed, so taking it back with Up
+    /// keeps them.
+    attachments: Vec<PathBuf>,
 }
 
 /// The prompt before the one showing; none when there's no earlier one.
-fn older(history: &[String], now: Option<&Browsing>, text: &str) -> Option<Browsing> {
+fn older(history: &[String], now: Option<&Browsing>, text: &str, attachments: &[PathBuf]) -> Option<Browsing> {
     let back = now.map_or(1, |b| b.back + 1);
     let shown = history.get(history.len().checked_sub(back)?)?.clone();
-    Some(Browsing { back, shown, draft: now.map_or_else(|| text.to_string(), |b| b.draft.clone()) })
+    Some(Browsing {
+        back,
+        shown,
+        draft: now.map_or_else(|| text.to_string(), |b| b.draft.clone()),
+        attachments: now.map_or_else(|| attachments.to_vec(), |b| b.attachments.clone()),
+    })
 }
 
 /// The prompt after the one showing, or what was being typed once past the newest.
 fn newer(history: &[String], now: &Browsing) -> Result<Browsing, String> {
     let back = now.back.saturating_sub(1);
     match history.len().checked_sub(back).and_then(|i| history.get(i)) {
-        Some(shown) if back > 0 => Ok(Browsing { back, shown: shown.clone(), draft: now.draft.clone() }),
+        Some(shown) if back > 0 => Ok(Browsing { back, shown: shown.clone(), draft: now.draft.clone(), attachments: now.attachments.clone() }),
         _ => Err(now.draft.clone()),
     }
 }
 
 /// Up at the start or Down at the end went through earlier prompts: consumed before the field
 /// sees them. Up leaves the cursor at the start and Down at the end, so pressing it again goes on.
-fn browse(ui: &mut Ui, id: egui::Id, text: &mut String, history: &dyn Fn() -> Vec<String>) {
+fn browse(ui: &mut Ui, id: egui::Id, text: &mut String, attachments: &[PathBuf], history: &dyn Fn() -> Vec<String>) {
     let key = id.with("history");
     // Editing what came back, or sending it, ends going through them.
     let now = ui.data_mut(|d| d.get_temp::<Browsing>(key)).filter(|b| b.shown == *text);
@@ -70,7 +78,7 @@ fn browse(ui: &mut Ui, id: egui::Id, text: &mut String, history: &dyn Fn() -> Ve
     let plain = egui::Modifiers::NONE;
     let up = at_start(ui.ctx(), id, text) && ui.input_mut(|i| i.consume_key(plain, egui::Key::ArrowUp));
     let next = if up {
-        older(&list(), now.as_ref(), text).map(Ok)
+        older(&list(), now.as_ref(), text, attachments).map(Ok)
     } else {
         now.as_ref().filter(|_| at_end(ui.ctx(), id, text) && ui.input_mut(|i| i.consume_key(plain, egui::Key::ArrowDown))).map(|b| newer(&list(), b))
     };
@@ -103,6 +111,8 @@ pub struct PromptOut {
     pub recall: bool,
     /// The attachment to remove.
     pub remove: Option<usize>,
+    /// A past prompt was brought back with Up, and its pictures should be restored too.
+    pub restored_attachments: Vec<PathBuf>,
 }
 
 pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBox) -> PromptOut {
@@ -155,7 +165,12 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
                 out.recall = true;
                 ui.data_mut(|d| d.insert_temp(to_end, true));
             } else if let Some(history) = b.history.filter(|_| focused && !b.recall) {
-                browse(ui, id, text, history);
+                browse(ui, id, text, attachments, history);
+                // When a past prompt comes back (Up/Down), keep its pictures too.
+                let key = id.with("history");
+                if let Some(browsing) = ui.data_mut(|d| d.get_temp::<Browsing>(key)) {
+                    out.restored_attachments = browsing.attachments.clone();
+                }
             }
             // No "more below" fade: the frame after each keystroke the scroll area briefly
             // measures a few points of overflow, and the fade blinked over the line being typed.
@@ -273,14 +288,14 @@ mod tests {
     #[test]
     fn up_goes_back_through_prompts_and_down_returns_to_what_was_being_typed() {
         let list = ["one".to_string(), "two".to_string()];
-        let first = older(&list, None, "half a thou").unwrap();
+        let first = older(&list, None, "half a thou", &[]).unwrap();
         assert_eq!((first.shown.as_str(), first.draft.as_str()), ("two", "half a thou"));
-        let second = older(&list, Some(&first), &first.shown).unwrap();
+        let second = older(&list, Some(&first), &first.shown, &[]).unwrap();
         assert_eq!((second.shown.as_str(), second.draft.as_str()), ("one", "half a thou"));
-        assert_eq!(older(&list, Some(&second), &second.shown), None, "the oldest stays");
+        assert_eq!(older(&list, Some(&second), &second.shown, &[]), None, "the oldest stays");
         assert_eq!(newer(&list, &second).unwrap().shown, "two");
         assert_eq!(newer(&list, &first), Err("half a thou".to_string()));
-        assert_eq!(older(&[], None, ""), None);
+        assert_eq!(older(&[], None, "", &[]), None);
     }
 
     #[test]
