@@ -123,6 +123,8 @@ Ghidra will use up to {gb} GB of memory.	Ghidra utilisera jusqu'à {gb} Go de m�
 Ghidra will use half of this computer's memory (up to {gb} GB).	Ghidra utilisera la moitié de la mémoire de cet ordinateur (jusqu'à {gb} Go).
 for programs up to	pour les programmes jusqu'à
 {gb} GB for bigger ones	{gb} Go pour les plus gros
+{gb} GB for programs up to {size}	{gb} Go pour les programmes jusqu'à {size}
+{gb} GB up to {size}	{gb} Go jusqu'à {size}
 Rough guide:	Repères :
 Automatic	Automatique
 Custom	Personnalisé
