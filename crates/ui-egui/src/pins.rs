@@ -206,6 +206,13 @@ fn menu(app: &mut CraftApp, ui: &mut Ui, row: &PinRow) {
         app.open_pin(row, false);
         ui.close();
     }
+    if ui.button(tr("Show folder")).clicked() {
+        if let Some(ws) = app.workspace.clone() {
+            let folder = ws.root.join("pinned").join(row.pin.id.to_string());
+            let _ = craft_anything_platform::open_path(folder);
+        }
+        ui.close();
+    }
     if ui.button(tr("Go to the project")).clicked() {
         if let Some(ws) = app.projects.iter().find(|w| w.root == row.project).cloned() {
             app.open_workspace(ws);
