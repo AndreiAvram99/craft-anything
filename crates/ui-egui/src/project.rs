@@ -1528,6 +1528,12 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
         if let Some(i) = out.remove {
             app.state.project_attachments.remove(i);
         }
+        // A past prompt brought back with Up keeps its pictures.
+        if !out.restored_attachments.is_empty() {
+            for att in out.restored_attachments {
+                app.attach(vec![att]);
+            }
+        }
         if out.attach {
             app.pick(crate::Pick::Attach);
         }
