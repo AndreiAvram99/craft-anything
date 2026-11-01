@@ -844,7 +844,13 @@ fn name_macos_godot(dir: &Path) -> Result<PathBuf, ToolError> {
         let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "the unpacked Godot.app has no editor executable");
         return Err(ToolError::io(exe.display(), missing));
     }
-    let had_previous = to.exists();
+    // An interrupted reinstall can leave only the hidden backup behind; bring it back first so it
+    // is treated as the previous install instead of staying unavailable.
+    let mut had_previous = to.exists();
+    if !had_previous && backup.exists() {
+        std::fs::rename(&backup, &to).map_err(|e| ToolError::io(backup.display(), e))?;
+        had_previous = true;
+    }
     if had_previous {
         match std::fs::remove_dir_all(&backup) {
             Ok(()) => {}
@@ -1032,6 +1038,26 @@ mod tests {
         assert!(name_macos_godot(&dir).is_err(), "no editor executable in the new app");
         assert!(dir.join(format!("Godot_v{GODOT_VERSION}.app/stale.txt")).exists());
         assert!(dir.join("Godot.app").exists(), "the download is left as it was");
+    }
+
+    #[test]
+    fn an_orphaned_macos_backup_is_recovered_before_a_failed_reinstall() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("godot");
+        // A past reinstall was interrupted after the old copy was moved aside.
+        touch(&dir, &format!(".Godot_v{GODOT_VERSION}.app.previous/stale.txt"), b"old");
+        touch(&dir, "Godot.app/Contents/MacOS/Godot", b"new");
+        let installed = name_macos_godot(&dir).unwrap();
+        assert_eq!(std::fs::read(installed.join("Contents/MacOS/Godot")).unwrap(), b"new");
+        assert!(!dir.join(format!(".Godot_v{GODOT_VERSION}.app.previous")).exists());
+
+        // An archive without the editor is refused before anything, the backup included, is moved.
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("godot");
+        touch(&dir, &format!(".Godot_v{GODOT_VERSION}.app.previous/stale.txt"), b"old");
+        touch(&dir, "Godot.app/Contents/Info.plist", b"");
+        assert!(name_macos_godot(&dir).is_err());
+        assert!(dir.join(format!(".Godot_v{GODOT_VERSION}.app.previous/stale.txt")).exists(), "an invalid archive leaves the backup alone");
     }
 
     #[test]
