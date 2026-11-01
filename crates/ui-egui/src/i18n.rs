@@ -39,10 +39,25 @@ fn parse(source: &str) -> HashMap<String, String> {
         .collect()
 }
 
-/// Switch language. Empty or unknown codes mean English.
+/// The operating system's language, or empty when it cannot be read.
+fn system_language() -> String {
+    sys_locale::get_locale().unwrap_or_default().to_ascii_lowercase()
+}
+
+/// The catalog for `code`, matching a full tag (`ja-jp`) or its language part (`ja`).
+fn language_for(code: &str) -> Option<&'static LangInfo> {
+    let code = code.trim().to_ascii_lowercase().replace('_', "-");
+    if let Some(exact) = LANGUAGES.iter().find(|l| l.code == code) {
+        return Some(exact);
+    }
+    // `pt-br` prefers `pt-br` over `pt`; the longest language part wins when both exist.
+    LANGUAGES.iter().filter(|l| !l.code.is_empty() && code.starts_with(&format!("{}-", l.code))).max_by_key(|l| l.code.len())
+}
+
+/// Switch language. An empty code means the system's language; unknown codes mean English.
 pub fn set_language(code: &str) {
-    let code = code.trim().to_ascii_lowercase();
-    let lang = LANGUAGES.iter().find(|l| l.code == code);
+    let code = if code.trim().is_empty() { system_language() } else { code.trim().to_ascii_lowercase() };
+    let lang = language_for(&code);
     let map = lang.map(|l| parse(l.source)).unwrap_or_default();
     if let Ok(mut g) = current().write() {
         *g = (lang.map(|l| l.code).unwrap_or("en").to_string(), map);
@@ -83,6 +98,16 @@ mod tests {
         set_language("xx");
         assert_eq!(language(), "en");
         assert_eq!(tr("Untranslated"), "Untranslated");
+    }
+
+    /// A locale tag finds its language, and anything unsupported falls back to English.
+    #[test]
+    fn locale_tags_pick_their_language() {
+        for (tag, code) in
+            [("ja", "ja"), ("ja-JP", "ja"), ("ja_JP.UTF-8", "ja"), ("fr-CA", "fr"), ("en-GB", "en"), ("de-DE", "en"), ("zh-CN", "en"), ("C", "en"), ("", "en")]
+        {
+            assert_eq!(language_for(tag).map(|l| l.code).unwrap_or("en"), code, "{tag:?}");
+        }
     }
 
     /// Every translation keeps its key's `{placeholders}`, or `trf` would leave them unfilled.
