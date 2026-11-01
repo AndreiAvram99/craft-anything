@@ -383,7 +383,10 @@ pub fn console_text(program: &std::path::Path, args: &[OsString], timeout: Durat
     if stopped.is_err() {
         let _ = child.kill();
     }
-    // Closing the console flushes it but can block, so it happens away from here.
+    // Closing the console flushes it and ends everything attached to it, which is what ends a
+    // launcher's children here. It can block, so it happens away from here.
+    // ponytail: no Job Object (portable-pty gives no process handle, and this workspace forbids
+    // unsafe), so a program that leaves this console for one of its own survives.
     let _ = std::thread::Builder::new().name("console-close".into()).spawn(move || drop((writer, master)));
     let text = screen_rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default();
     Ok((text, stopped?.try_into().ok()))
@@ -402,6 +405,24 @@ mod console_tests {
         assert_eq!(code, Some(3));
         let hang: Vec<OsString> = ["/c", "ping -n 60 127.0.0.1"].map(OsString::from).to_vec();
         assert_eq!(console_text(&cmd, &hang, Duration::from_millis(300), None).unwrap_err().code, ErrorCode::TimedOut);
+    }
+
+    #[test]
+    fn nothing_it_started_outlives_the_deadline() {
+        // The program starts a second one that keeps adding to a file, like a launcher and its Python.
+        let dir = tempfile::tempdir().unwrap();
+        let ticks = dir.path().join("ticks");
+        std::fs::write(dir.path().join("tick.cmd"), "@echo off\r\n:again\r\necho x>>\"%~dp0ticks\"\r\nping -n 2 127.0.0.1 >nul\r\ngoto again\r\n").unwrap();
+        std::fs::write(dir.path().join("main.cmd"), "@echo off\r\nstart /b cmd /c \"%~dp0tick.cmd\"\r\nping -n 60 127.0.0.1 >nul\r\n").unwrap();
+        let cmd = PathBuf::from(std::env::var_os("ComSpec").unwrap());
+        let run = vec![OsString::from("/c"), dir.path().join("main.cmd").into_os_string()];
+        let e = console_text(&cmd, &run, Duration::from_secs(4), None).unwrap_err();
+        assert_eq!(e.code, ErrorCode::TimedOut);
+        assert!(ticks.is_file(), "the second program never ran");
+        std::thread::sleep(Duration::from_secs(2));
+        let before = std::fs::metadata(&ticks).unwrap().len();
+        std::thread::sleep(Duration::from_secs(4));
+        assert_eq!(std::fs::metadata(&ticks).unwrap().len(), before, "the second program is still running");
     }
 }
 
