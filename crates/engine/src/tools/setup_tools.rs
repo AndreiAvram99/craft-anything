@@ -392,7 +392,10 @@ fn engines_list(ctx: &mut Ctx<'_>, _params: Value) -> Result<ToolOutput, ToolErr
                 "id": e.id,
                 "name": e.name,
                 "needed_for": e.needed_for,
-                "found": craft_anything_engines::locate(e.id, &s.engines.tools, &store).map(|p| p.display().to_string()),
+                // Ghidra has its own folder setting (not a `tool_paths!` override), so ask the setting first.
+                "found": craft_anything_engines::locate(e.id, &s.engines.tools, &store)
+                    .or_else(|| (e.id == "ghidra").then(|| s.ghidra_launcher()).flatten())
+                    .map(|p| p.display().to_string()),
                 "installable_here": e.host_pin().is_some(),
             })
         })
