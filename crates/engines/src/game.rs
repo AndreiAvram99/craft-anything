@@ -834,13 +834,27 @@ fn name_macos_godot(dir: &Path) -> Result<PathBuf, ToolError> {
     let from = dir.join("Godot.app");
     let to = dir.join(format!("Godot_v{GODOT_VERSION}.app"));
     // A reinstall finds the copy from the last install here, and rename can't replace a folder
-    // that isn't empty, so the old copy goes first.
-    match std::fs::remove_dir_all(&to) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(ToolError::io(to.display(), e)),
+    // that isn't empty. Move the old copy aside (hidden, so the store ignores it) and put it back
+    // if the new one can't be moved in, so a failed reinstall keeps the working editor.
+    let backup = dir.join(format!(".Godot_v{GODOT_VERSION}.app.previous"));
+    let had_previous = to.exists();
+    if had_previous {
+        match std::fs::remove_dir_all(&backup) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(ToolError::io(backup.display(), e)),
+        }
+        std::fs::rename(&to, &backup).map_err(|e| ToolError::io(to.display(), e))?;
     }
-    std::fs::rename(&from, &to).map_err(|e| ToolError::io(from.display(), e))?;
+    if let Err(e) = std::fs::rename(&from, &to) {
+        if had_previous {
+            let _ = std::fs::rename(&backup, &to);
+        }
+        return Err(ToolError::io(from.display(), e));
+    }
+    if had_previous {
+        let _ = std::fs::remove_dir_all(&backup);
+    }
     Ok(to)
 }
 
@@ -994,6 +1008,17 @@ mod tests {
         let again = name_macos_godot(&store.join("godot")).expect("a second install must not fail on the first copy");
         assert!(!again.join("stale.txt").exists(), "the old copy is replaced");
         assert_eq!(std::fs::read(again.join("Contents/MacOS/Godot")).unwrap(), b"new");
+    }
+
+    #[test]
+    fn failed_macos_reinstall_keeps_the_working_editor() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("godot");
+        // The previous install is there, but the new download did not unpack a Godot.app.
+        touch(&dir, &format!("Godot_v{GODOT_VERSION}.app/stale.txt"), b"old");
+        assert!(name_macos_godot(&dir).is_err(), "no Godot.app to move in");
+        assert_eq!(std::fs::read(dir.join(format!("Godot_v{GODOT_VERSION}.app/stale.txt"))).unwrap(), b"old", "the working install is put back");
+        assert!(!dir.join(format!(".Godot_v{GODOT_VERSION}.app.previous")).exists());
     }
 
     #[test]
