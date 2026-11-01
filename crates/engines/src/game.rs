@@ -833,6 +833,13 @@ pub fn install_godot(store: &Path, cancel: Option<Cancel>, progress: &dyn Fn(u64
 fn name_macos_godot(dir: &Path) -> Result<PathBuf, ToolError> {
     let from = dir.join("Godot.app");
     let to = dir.join(format!("Godot_v{GODOT_VERSION}.app"));
+    // A reinstall finds the copy from the last install here, and rename can't replace a folder
+    // that isn't empty, so the old copy goes first.
+    match std::fs::remove_dir_all(&to) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(ToolError::io(to.display(), e)),
+    }
     std::fs::rename(&from, &to).map_err(|e| ToolError::io(from.display(), e))?;
     Ok(to)
 }
@@ -976,10 +983,17 @@ mod tests {
         touch(&store.join("godot"), "Godot.app/Contents/MacOS/Godot", b"");
         let renamed = name_macos_godot(&store.join("godot")).unwrap();
         assert!(renamed.ends_with(format!("Godot_v{GODOT_VERSION}.app")));
-        let inv = inventory(&Places { store, ..Default::default() });
+        let inv = inventory(&Places { store: store.clone(), ..Default::default() });
         let godot = inv.best(Builder::Godot).expect("an unpacked Godot.app must be found");
         assert_eq!(godot.version, "4.4.1");
         assert!(godot.program.ends_with("Contents/MacOS/Godot"));
+
+        // A reinstall unpacks a new Godot.app over the one from the first install.
+        touch(&store.join("godot"), "Godot.app/Contents/MacOS/Godot", b"new");
+        touch(&store.join("godot"), &format!("Godot_v{GODOT_VERSION}.app/stale.txt"), b"old");
+        let again = name_macos_godot(&store.join("godot")).expect("a second install must not fail on the first copy");
+        assert!(!again.join("stale.txt").exists(), "the old copy is replaced");
+        assert_eq!(std::fs::read(again.join("Contents/MacOS/Godot")).unwrap(), b"new");
     }
 
     #[test]
