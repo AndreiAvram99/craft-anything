@@ -795,7 +795,8 @@ Gaps found while using the app for real projects.
       ends, so a long `cargo build` is one quiet line until then. Watching the agent's child
       processes from outside could say what's running and for how long
 - [ ] Sometimes starting the app shows nothing: find why from `desktop.log` (a GOG Galaxy Vulkan
-      overlay layer loads into the app; try DX12 first on Windows if that's it)
+      overlay layer loads into the app; try DX12 first on Windows if that's it) — claimed: muraa-p, branch
+      bugfix/r2.9-start-shows-nothing
 - [x] Try again picks up where a run stopped instead of starting over: a project whose builder
       has worked isn't studied again or given the first brief; when the builder had finished and
       only the check didn't (`awaiting_check` in craft.json), only the check runs. A check that
