@@ -818,11 +818,23 @@ pub fn install_godot(store: &Path, cancel: Option<Cancel>, progress: &dyn Fn(u64
             .with_remediation("Try again, or get Godot from godotengine.org."));
     }
     crate::install::unpack_zip_into(&data, &dir, GODOT_MAX_FILE, cancel.as_ref())?;
-    let path = dir.join(&program);
+    let mut path = dir.join(&program);
+    if program == "Godot.app" && path.exists() {
+        path = name_macos_godot(&dir)?;
+    }
     if !path.exists() {
         return Err(ToolError::new(ErrorCode::GarbledOutput, "Godot was unpacked, but its program wasn't where we expected."));
     }
     Ok(if program.ends_with(".app") { path.join("Contents/MacOS/Godot") } else { path })
+}
+
+/// The macOS zip unpacks as `Godot.app`; the store finds editors by their `Godot_v<version>` name,
+/// so rename it to that. Returns the new path.
+fn name_macos_godot(dir: &Path) -> Result<PathBuf, ToolError> {
+    let from = dir.join("Godot.app");
+    let to = dir.join(format!("Godot_v{GODOT_VERSION}.app"));
+    std::fs::rename(&from, &to).map_err(|e| ToolError::io(from.display(), e))?;
+    Ok(to)
 }
 
 #[cfg(test)]
@@ -955,6 +967,19 @@ mod tests {
         touch(&pf, "Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.40/x", b"");
         assert!(inventory(&p).ready(Builder::Unreal));
         assert!(!inv.ready(Builder::Rust), "PATH isn't searched here");
+    }
+
+    #[test]
+    fn unpacked_macos_godot_is_found_in_the_store() {
+        let d = tempfile::tempdir().unwrap();
+        let store = d.path().join("store");
+        touch(&store.join("godot"), "Godot.app/Contents/MacOS/Godot", b"");
+        let renamed = name_macos_godot(&store.join("godot")).unwrap();
+        assert!(renamed.ends_with(format!("Godot_v{GODOT_VERSION}.app")));
+        let inv = inventory(&Places { store, ..Default::default() });
+        let godot = inv.best(Builder::Godot).expect("an unpacked Godot.app must be found");
+        assert_eq!(godot.version, "4.4.1");
+        assert!(godot.program.ends_with("Contents/MacOS/Godot"));
     }
 
     #[test]
