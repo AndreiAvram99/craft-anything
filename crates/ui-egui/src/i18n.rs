@@ -18,7 +18,8 @@ pub struct LangInfo {
     pub source: &'static str,
 }
 
-pub static LANGUAGES: &[LangInfo] = &[LangInfo { code: "en", name: "English", source: "" }];
+pub static LANGUAGES: &[LangInfo] =
+    &[LangInfo { code: "en", name: "English", source: "" }, LangInfo { code: "pt-br", name: "Português (Brasil)", source: include_str!("pt-br.tsv") }];
 
 fn current() -> &'static RwLock<(String, HashMap<String, String>)> {
     static CUR: OnceLock<RwLock<(String, HashMap<String, String>)>> = OnceLock::new();
@@ -79,5 +80,19 @@ mod tests {
         set_language("xx");
         assert_eq!(language(), "en");
         assert_eq!(tr("Untranslated"), "Untranslated");
+    }
+
+    #[test]
+    fn brazilian_portuguese_catalog_is_whole() {
+        let pt = LANGUAGES.iter().find(|l| l.code == "pt-br").expect("the pt-br catalog");
+        let map = parse(pt.source);
+        assert!(map.len() > 500, "{} entries", map.len());
+        assert!(map.values().all(|v| !v.trim().is_empty()));
+        assert_eq!(map.get("Cancel").map(String::as_str), Some("Cancelar"));
+        set_language("pt-br");
+        assert_eq!(language(), "pt-br");
+        assert_eq!(tr("Cancel"), "Cancelar");
+        assert_eq!(trf("May I {action}?", &[("action", "x")]), "Posso x?");
+        set_language("");
     }
 }
