@@ -837,6 +837,13 @@ fn name_macos_godot(dir: &Path) -> Result<PathBuf, ToolError> {
     // that isn't empty. Move the old copy aside (hidden, so the store ignores it) and put it back
     // if the new one can't be moved in, so a failed reinstall keeps the working editor.
     let backup = dir.join(format!(".Godot_v{GODOT_VERSION}.app.previous"));
+    // An archive that unpacks a `Godot.app` without the editor inside must not displace a working
+    // install, so check before anything is moved.
+    let exe = from.join("Contents/MacOS/Godot");
+    if !exe.is_file() {
+        let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "the unpacked Godot.app has no editor executable");
+        return Err(ToolError::io(exe.display(), missing));
+    }
     let had_previous = to.exists();
     if had_previous {
         match std::fs::remove_dir_all(&backup) {
@@ -1019,6 +1026,12 @@ mod tests {
         assert!(name_macos_godot(&dir).is_err(), "no Godot.app to move in");
         assert_eq!(std::fs::read(dir.join(format!("Godot_v{GODOT_VERSION}.app/stale.txt"))).unwrap(), b"old", "the working install is put back");
         assert!(!dir.join(format!(".Godot_v{GODOT_VERSION}.app.previous")).exists());
+
+        // A Godot.app without the editor inside is just as unusable and must not replace it either.
+        touch(&dir, "Godot.app/Contents/Info.plist", b"");
+        assert!(name_macos_godot(&dir).is_err(), "no editor executable in the new app");
+        assert!(dir.join(format!("Godot_v{GODOT_VERSION}.app/stale.txt")).exists());
+        assert!(dir.join("Godot.app").exists(), "the download is left as it was");
     }
 
     #[test]
